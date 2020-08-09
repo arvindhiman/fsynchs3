@@ -14,6 +14,18 @@ import (
 	"github.com/spf13/viper"
 )
 
+type config struct {
+	Region    string `yaml:"region"`
+	Bucket    string `yaml:"bucket"`
+	LocalDir  string `yaml:"local-directory"`
+	AccessKey string `yaml:"access-key"`
+	Secret    string `yaml:"secret"`
+}
+
+var (
+	conf *config
+)
+
 func exitErrorf(msg string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, msg+"\n", args...)
 	os.Exit(1)
@@ -24,26 +36,39 @@ func timeTrack(start time.Time, name string) {
 	log.Printf("%s took %s", name, elapsed)
 }
 
-func main() {
+func getConfig() *config {
 
 	viper.SetConfigName("config")
-	viper.SetConfigType("json")
+	viper.SetConfigType("yaml")
 	viper.AddConfigPath("$HOME")
+
 	err := viper.ReadInConfig() // Find and read the config file
 	if err != nil {             // Handle errors reading the config file
 		panic(fmt.Errorf("Fatal error config file: %s \n", err))
 	}
 
-	region := viper.GetString("region")
-	accessKey := viper.GetString("accessKey")
-	secret := viper.GetString("secret")
-	inboundDir := viper.GetString("inboundDir")
-	bucket := viper.GetString("bucket")
+	conf := &config{}
 
+	conf.Region = viper.GetString("region")
+	conf.Bucket = viper.GetString("bucket")
+	conf.LocalDir = viper.GetString("local-directory")
+	conf.AccessKey = viper.GetString("access-key")
+	conf.Secret = viper.GetString("secret")
+
+	return conf
+}
+
+// Initialization routine.
+func init() {
+	// Retrieve config options.
+	conf = getConfig()
+}
+
+func main() {
 	// Create a single AWS session (we can re use this if we're uploading many files)
 	sess, err := session.NewSession(&aws.Config{
-		Region:      aws.String(region),
-		Credentials: credentials.NewStaticCredentials(accessKey, secret, ""),
+		Region:      aws.String(conf.Region),
+		Credentials: credentials.NewStaticCredentials(conf.AccessKey, conf.Secret, ""),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -67,7 +92,7 @@ func main() {
 				if event.Op&fsnotify.Create == fsnotify.Create || event.Op&fsnotify.Write == fsnotify.Write {
 					log.Println("created or modified file: ", event.Name)
 
-					AddFileToS3(sess, bucket, event.Name)
+					AddFileToS3(sess, conf.Bucket, event.Name)
 				}
 
 			case err, ok := <-watcher.Errors:
@@ -79,7 +104,7 @@ func main() {
 		}
 	}()
 
-	err = watcher.Add(inboundDir)
+	err = watcher.Add(conf.LocalDir)
 	if err != nil {
 		log.Fatal(err)
 	}
