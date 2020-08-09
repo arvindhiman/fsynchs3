@@ -15,11 +15,11 @@ import (
 )
 
 type config struct {
-	Region    string `yaml:"region"`
-	Bucket    string `yaml:"bucket"`
-	LocalDir  string `yaml:"local-directory"`
-	AccessKey string `yaml:"access-key"`
-	Secret    string `yaml:"secret"`
+	Region    string `mapstructure:"region"`
+	Bucket    string `mapstructure:"bucket"`
+	LocalDir  string `mapstructure:"local-directory"`
+	AccessKey string `mapstructure:"access-key"`
+	Secret    string `mapstructure:"secret"`
 }
 
 var (
@@ -49,11 +49,7 @@ func getConfig() *config {
 
 	conf := &config{}
 
-	conf.Region = viper.GetString("region")
-	conf.Bucket = viper.GetString("bucket")
-	conf.LocalDir = viper.GetString("local-directory")
-	conf.AccessKey = viper.GetString("access-key")
-	conf.Secret = viper.GetString("secret")
+	viper.Unmarshal(conf)
 
 	return conf
 }
