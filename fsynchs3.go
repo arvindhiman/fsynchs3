@@ -61,14 +61,6 @@ func init() {
 }
 
 func main() {
-	// Create a single AWS session (we can re use this if we're uploading many files)
-	sess, err := session.NewSession(&aws.Config{
-		Region:      aws.String(conf.Region),
-		Credentials: credentials.NewStaticCredentials(conf.AccessKey, conf.Secret, ""),
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -77,28 +69,11 @@ func main() {
 	defer watcher.Close()
 
 	done := make(chan bool)
-	go func() {
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
+	fseventchan := make(chan string)
 
-				if event.Op&fsnotify.Create == fsnotify.Create || event.Op&fsnotify.Write == fsnotify.Write {
-					log.Println("created or modified file: ", event.Name)
+	go RunS3Uploader(fseventchan)
 
-					AddFileToS3(sess, conf.Bucket, event.Name)
-				}
-
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Println("error:", err)
-			}
-		}
-	}()
+	go RunWatcher(watcher, fseventchan)
 
 	err = watcher.Add(conf.LocalDir)
 	if err != nil {
@@ -108,29 +83,65 @@ func main() {
 	<-done
 }
 
-func AddFileToS3(sess *session.Session, bucket string, filepath string) {
+func RunWatcher(watcher *fsnotify.Watcher, fseventchan chan<- string) {
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+
+			if event.Op&fsnotify.Create == fsnotify.Create || event.Op&fsnotify.Write == fsnotify.Write {
+				log.Println("created or modified file: ", event.Name)
+				fseventchan <- event.Name
+			}
+
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Println("error:", err)
+		}
+	}
+}
+
+func RunS3Uploader(fseventchan <-chan string) {
+
+	// Create a single AWS session (we can re use this if we're uploading many files)
+	sess, err := session.NewSession(&aws.Config{
+		Region:      aws.String(conf.Region),
+		Credentials: credentials.NewStaticCredentials(conf.AccessKey, conf.Secret, ""),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	defer timeTrack(time.Now(), "AddFileToS3")
 
-	// Open the file for use
-	file, err := os.Open(filepath)
-	if err != nil {
-		exitErrorf("Unable to open file %q, %v", err)
+	for {
+
+		filepath := <-fseventchan
+
+		// Open the file for use
+		file, err := os.Open(filepath)
+		if err != nil {
+			exitErrorf("Unable to open file %q, %v", err)
+		}
+
+		defer file.Close()
+
+		uploader := s3manager.NewUploader(sess)
+
+		_, err = uploader.Upload(&s3manager.UploadInput{
+			Bucket: aws.String(conf.Bucket),
+			Key:    aws.String(filepath),
+			Body:   file,
+		})
+		if err != nil {
+			// Print the error and exit.
+			exitErrorf("Unable to upload %q to %q, %v", filepath, conf.Bucket, err)
+		}
+
+		fmt.Printf("Successfully uploaded %q to %q\n", filepath, conf.Bucket)
 	}
-
-	defer file.Close()
-
-	uploader := s3manager.NewUploader(sess)
-
-	_, err = uploader.Upload(&s3manager.UploadInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(filepath),
-		Body:   file,
-	})
-	if err != nil {
-		// Print the error and exit.
-		exitErrorf("Unable to upload %q to %q, %v", filepath, bucket, err)
-	}
-
-	fmt.Printf("Successfully uploaded %q to %q\n", filepath, bucket)
 }
