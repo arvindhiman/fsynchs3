@@ -69,6 +69,7 @@ func main() {
 	defer watcher.Close()
 
 	done := make(chan bool)
+
 	fseventchan := make(chan string)
 
 	go RunS3Uploader(fseventchan)
@@ -116,7 +117,7 @@ func RunS3Uploader(fseventchan <-chan string) {
 		log.Fatal(err)
 	}
 
-	defer timeTrack(time.Now(), "AddFileToS3")
+	uploader := s3manager.NewUploader(sess)
 
 	for {
 
@@ -129,8 +130,6 @@ func RunS3Uploader(fseventchan <-chan string) {
 		}
 
 		defer file.Close()
-
-		uploader := s3manager.NewUploader(sess)
 
 		_, err = uploader.Upload(&s3manager.UploadInput{
 			Bucket: aws.String(conf.Bucket),
